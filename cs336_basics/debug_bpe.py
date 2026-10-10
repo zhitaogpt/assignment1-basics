@@ -1,17 +1,17 @@
 """
 BPE 对拍调试脚本 —— 只含打印骨架，算法复用你 train_bpe.py 里的逻辑。
-用法: 改 CONFIG 里的语料路径, 然后:
-    cd ~/repos/AI-learning/cs336/assignment1-basics
-    uv run python /tmp/debug_bpe.py
+用法（在仓库根目录 assignment1-basics/ 下运行）:
+    uv run python -m cs336_basics.debug_bpe
 """
-import sys
-sys.path.insert(0, "/Users/guanxuan.zzt/repos/AI-learning/cs336/assignment1-basics")
-
 from collections import Counter
+from pathlib import Path
+
 import regex as re
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 # ============ CONFIG ============
-INPUT_PATH = "/Users/guanxuan.zzt/repos/AI-learning/cs336/assignment1-basics/tests/fixtures/corpus.en.test"
+INPUT_PATH = REPO_ROOT / "tests/fixtures/corpus.en.test"
 SPECIAL_TOKENS = ["<|endoftext|>"]
 NUM_ROUNDS = 5          # 手动模拟前 N 轮 merge
 TOP_K = 8               # 每轮打印频率前 K 的 pair

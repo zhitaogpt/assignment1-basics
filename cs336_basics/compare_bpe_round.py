@@ -1,15 +1,17 @@
 """
 BPE 对拍调试脚本 —— 对比你的实现和 naive 参考实现在指定轮次的差异
-用法: uv run python /tmp/compare_bpe_round.py
+用法（在仓库根目录 assignment1-basics/ 下运行）:
+    uv run python -m cs336_basics.compare_bpe_round
 """
-import sys
-sys.path.insert(0, "/Users/guanxuan.zzt/repos/AI-learning/cs336/assignment1-basics")
-
 from collections import Counter
+from pathlib import Path
+
 import regex as re
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 # ============ CONFIG ============
-INPUT_PATH = "/Users/guanxuan.zzt/repos/AI-learning/cs336/assignment1-basics/tests/fixtures/corpus.en"
+INPUT_PATH = REPO_ROOT / "tests/fixtures/corpus.en"
 SPECIAL_TOKENS = ["<|endoftext|>"]
 TARGET_ROUND = 57          # 要对比的轮次
 TOP_K = 5                  # 打印 Top K 候选
