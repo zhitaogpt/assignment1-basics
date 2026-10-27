@@ -81,11 +81,13 @@ class SwiGLU(nn.Module):
         d_ff: int,
         device=None,
         dtype=None,
+        mode="swiglu"
     ):
         super().__init__()
+        self.mode = mode
         # 升维
         self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
-        self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
+        self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype) if mode== "swiglu" else None
 
         self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
 
@@ -95,8 +97,11 @@ class SwiGLU(nn.Module):
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         r1 = self.w1(x)
-        r3 = self.w3(x)
-        silu = self._silu(r1) * r3
+        if self.mode == "swiglu":
+            r3 = self.w3(x)
+            silu = self._silu(r1) * r3
+        else:
+            silu = self._silu(r1)
         return self.w2(silu)
 
 
@@ -161,11 +166,12 @@ class MultiHeadSelfAttention(nn.Module):
         max_seq_len=None,
         device=None,
         dtype=None,
+        pos_emb="rope"
     ):
         super().__init__()
         self.dk = d_model // num_heads
         self.num_heads = num_heads
-        if max_seq_len is not None and theta is not None:
+        if max_seq_len is not None and theta is not None and pos_emb == "rope":
             self.rope = RotaryPositionalEmbedding(theta, self.dk, max_seq_len, device=device)
         self.q_proj = Linear(d_model, d_model, device=device, dtype=dtype)
         self.k_proj = Linear(d_model, d_model, device=device, dtype=dtype)
@@ -207,12 +213,19 @@ class TransformerBlock(nn.Module):
         theta: float,
         device=None,
         dtype=None,
+        norm="rmsnorm",#abalation
+        norm_placement="pre",
+        pos_emb="rope",
+        ffn="swiglu"
     ):
         super().__init__()
-        self.ln1 = RMSNorm(d_model, device=device, dtype=dtype)
-        self.attn = MultiHeadSelfAttention(d_model, num_heads, theta, max_seq_len, device=device, dtype=dtype)
-        self.ln2 = RMSNorm(d_model, device=device, dtype=dtype)
-        self.ffn = SwiGLU(d_model, d_ff, device=device, dtype=dtype)
+        self.ln1 = RMSNorm(d_model, device=device, dtype=dtype) if norm == "rmsnorm" else None
+        self.attn = MultiHeadSelfAttention(d_model, num_heads, theta, max_seq_len, device=device, dtype=dtype, pos_emb=pos_emb)
+        self.ln2 = RMSNorm(d_model, device=device, dtype=dtype) if norm == "rmsnorm" else None
+        self.ffn = SwiGLU(d_model, d_ff, device=device, dtype=dtype,mode=ffn)
+        self.abalation={
+            "norm_placement":norm_placement
+        }
 
     def forward(
         self,
@@ -221,15 +234,22 @@ class TransformerBlock(nn.Module):
     ) -> torch.Tensor:
         if token_positions is None:
             token_positions = torch.arange(x.size(1), device=x.device)
-        x_norm1 = self.ln1(x)
-        attention_output = self.attn(x_norm1, token_positions)
-        x_residual1 = x + attention_output
+        if self.abalation.get("norm_placement","pre") == "pre":
+            x_norm1 = self.ln1(x) if self.ln1 else x
+            attention_output = self.attn(x_norm1, token_positions)
+            x = x + attention_output
 
-        x_norm2 = self.ln2(x_residual1)
-        ffn_output = self.ffn(x_norm2)
-        x_residual2 = x_residual1 + ffn_output
+            x_norm2 = self.ln2(x) if self.ln2 else x
+            ffn_output = self.ffn(x_norm2)
+            x = x + ffn_output
+        else:
+            x = self.attn(x, token_positions) + x
+            x = self.ln1(x) if self.ln1 else x
 
-        return x_residual2
+            x = self.ffn(x) + x
+            x = self.ln2(x) if self.ln2 else x        
+
+        return x
 
 
 class TransformerLM(nn.Module):
@@ -247,17 +267,22 @@ class TransformerLM(nn.Module):
         rope_theta: float,
         device=None,
         dtype=None,
+        norm="rmsnorm",#abalation
+        norm_placement="pre",
+        pos_emb="rope",
+        ffn="swiglu"
     ):
         super().__init__()
         # vocab_size * d_model
         self.token_embeddings = Embedding(vocab_size, d_model, device=device, dtype=dtype)
         # num_layers * (4 * d_model * d_model + 3 * d_model * d_ff + 2 * d_model)
         self.layers = nn.ModuleList(
-            TransformerBlock(d_model, num_heads, d_ff, context_length, rope_theta, device=device, dtype=dtype)
+            TransformerBlock(d_model, num_heads, d_ff, context_length, rope_theta, device=device, dtype=dtype,
+                             norm=norm, norm_placement=norm_placement, pos_emb=pos_emb, ffn=ffn)
             for _ in range(num_layers)
         )
         # d_model
-        self.ln_final = RMSNorm(d_model, device=device, dtype=dtype)
+        self.ln_final = RMSNorm(d_model, device=device, dtype=dtype) if norm =="rmsnorm" else None
         # d_model * vocab_size
         self.lm_head = Linear(d_model, vocab_size, device=device, dtype=dtype)
 
@@ -267,6 +292,6 @@ class TransformerLM(nn.Module):
         x = self.token_embeddings(in_indices)
         for layer in self.layers:
             x = layer(x, token_positions)
-        x = self.ln_final(x)
+        x = self.ln_final(x) if self.ln_final else x
         logits = self.lm_head(x)
         return logits
