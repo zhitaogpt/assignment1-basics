@@ -105,16 +105,70 @@ def make_plot(results, out_path: Path) -> None:
     except ImportError:
         print("[plot] 未安装 matplotlib,跳过绘图(pip install matplotlib 后可生成曲线图)")
         return
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+    # 按 run 长度(最大 step)分组:full(40000 步)和 lite(5000 步)混在一张图上,
+    # 前者会把后者压进左侧一条缝。拆成多张图:out_path 放最长的 full 组,
+    # 其余每组一张 <stem>_<steps>steps.png;只有一种长度时就一张图。
+    by_steps: dict[int, list] = {}
     for r in results:
-        if r["train_steps"]:
-            axes[0].plot(r["train_steps"], r["train_losses"], label=r["name"], alpha=0.8)
-        if r["val_steps"]:
-            axes[1].plot(r["val_steps"], r["val_losses"], "o-", label=r["name"], alpha=0.8)
-    axes[0].set(xlabel="step", ylabel="train loss", title="train loss")
-    axes[1].set(xlabel="step", ylabel="val loss", title="val loss")
+        by_steps.setdefault(max(r["train_steps"], default=0), []).append(r)
+    longest = max(by_steps)
+    jobs = [(out_path, by_steps[longest])]
+    for k in sorted(by_steps):
+        if k != longest:
+            jobs.append((out_path.with_name(f"{out_path.stem}_{k}steps{out_path.suffix}"),
+                         by_steps[k]))
+    for path, runs in jobs:
+        _plot_group(plt, runs, path)
+
+
+def _plot_group(plt, results, out_path: Path) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+    # 发散 run(如 no_rmsnorm)的 loss 会到天文数字,线性坐标会把其他曲线压成直线。
+    # 对策:x/y 都用 log 坐标,且 y 上限只按未发散 run 计算——
+    # 发散曲线冲出上边界自然截断,既看清正常曲线形状,又能看到它"飞天"的时刻。
+    diverged = {r["name"] for r in results
+                if (s := _loss_stats(r["train_losses"])) and s[3]}
+    # 分组编码:同组同线型+marker,组内同色系不同深浅:
+    #   baseline=黑实线+圆点, lr=红系虚线+三角, batch=蓝系点划线+方块, ablation=紫系点线+菱形
+    _GROUPS = {  # 组前缀 -> (linestyle, marker, 色系 colormap;None=纯黑)
+        "baseline": ("-", "o", None),
+        "lr":       ("--", "^", "Reds"),
+        "batch":    ("-.", "s", "Blues"),
+        "ablation": (":", "D", "Purples"),
+        "main":     ("-", "X", "Greens"),
+    }
+    by_group: dict[str, list] = {}
+    for r in results:
+        g = r["name"].split("_")[0]
+        by_group.setdefault(g if g in _GROUPS else "baseline", []).append(r)
+    for gname, runs in by_group.items():
+        ls, marker, cmap_name = _GROUPS[gname]
+        n = len(runs)
+        for j, r in enumerate(runs):
+            tag = " (diverged)" if r["name"] in diverged else ""
+            color = ("black" if cmap_name is None
+                     else plt.get_cmap(cmap_name)(0.45 + 0.5 * (j / max(n - 1, 1))))
+            if r["train_steps"]:
+                # log-x 下 step 0 无法显示,滤掉非正点
+                xs, ys = zip(*[(s, l) for s, l in zip(r["train_steps"], r["train_losses"]) if s > 0])
+                axes[0].plot(xs, ys, ls, color=color,
+                             label=r["name"] + tag, alpha=0.85, linewidth=1.4)
+            if r["val_steps"]:
+                xs, ys = zip(*[(s, l) for s, l in zip(r["val_steps"], r["val_losses"]) if s > 0])
+                axes[1].plot(xs, ys, ls, color=color, marker=marker,
+                             label=r["name"] + tag, alpha=0.85, linewidth=1.4, markersize=5)
+    healthy_train = [l for r in results if r["name"] not in diverged for l in r["train_losses"]]
+    healthy_val = [l for r in results if r["name"] not in diverged for l in r["val_losses"]]
+    if healthy_train:
+        axes[0].set_ylim(min(healthy_train) * 0.9, max(healthy_train) * 1.5)
+    if healthy_val:
+        axes[1].set_ylim(min(healthy_val) * 0.9, max(healthy_val) * 1.5)
+    axes[0].set(xlabel="step (log)", ylabel="train loss", title="train loss (log-log)")
+    axes[1].set(xlabel="step (log)", ylabel="val loss", title="val loss (log-log)")
     for ax in axes:
-        ax.grid(alpha=0.3)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.grid(alpha=0.3, which="both")
         if ax.get_legend_handles_labels()[1]:
             ax.legend(fontsize=8)
     fig.tight_layout()

@@ -75,14 +75,14 @@ VARIANT_KWARGS = {
 def resolve_variant(args):
     """--variant -> (实际 d_ff, TransformerLM 的消融 kwargs)。
 
-    silu 只有 2 个 FFN 矩阵,要与 SwiGLU(3 个)对齐参数量:
-        3 * d * d_ff_swiglu == 2 * d * d_ff_silu  =>  d_ff_silu = 1.5 * d_ff_swiglu
+    silu 只有 2 个 FFN 矩阵,要与 SwiGLU(3 个)对齐参数量。
+    handout §7.3 指定:FFN_SiLU 用 d_ff = 4 * d_model(近似匹配 3 矩阵的 SwiGLU)。
     只在调用侧做这一次转换,model.py 不要重复处理。
     """
     kwargs = dict(VARIANT_KWARGS[args.variant])
     d_ff = args.d_ff
     if args.variant == "silu":
-        d_ff = 3 * args.d_ff // 2
+        d_ff = 4 * args.d_model
     return d_ff, kwargs
 
 

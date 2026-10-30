@@ -92,13 +92,14 @@ def encode_corpus_to_uint16(tokenizer: Tokenizer, text_path: Path, bin_path: Pat
 
 def main() -> None:
     ts = load_tokenizer(OUT / "tinystories_10k", 10_000)
-    owt = load_tokenizer(OUT / "owt_valid_32k", 32_000)
 
     if "smoke" in sys.argv:
         n = encode_corpus_to_uint16(ts, DATA / "TinyStoriesV2-GPT4-valid.txt", OUT / "ts_valid.bin")
         a = np.fromfile(OUT / "ts_valid.bin", dtype=np.uint16)
         print(f"(d) smoke: {n:,} tokens | reloaded {a.shape} {a.dtype} | first ids {a[:10].tolist()}")
         return
+
+    owt = load_tokenizer(OUT / "owt_valid_32k", 32_000)
 
     ts_docs = sample_documents(DATA / "TinyStoriesV2-GPT4-valid.txt")
     owt_docs = sample_documents(DATA / "owt_valid.txt")
